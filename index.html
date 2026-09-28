@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Why Codex CLI Can't See Your API Key</title>
+<meta name="description" content="Codex CLI reports 'Missing environment variable' even though the variable is set and codex doctor shows it as present. The real cause: a long-lived app-server daemon that cached a stale environment at startup. Diagnosis and fix.">
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1b1f23;
+    --muted: #57606a;
+    --border: #d0d7de;
+    --code-bg: #f6f8fa;
+    --accent: #0969da;
+    --accent-bg: #ddf4ff;
+    --danger: #cf222e;
+    --danger-bg: #ffebe9;
+    --ok: #1a7f37;
+    --ok-bg: #dafbe1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d1117;
+      --fg: #e6edf3;
+      --muted: #8b949e;
+      --border: #30363d;
+      --code-bg: #161b22;
+      --accent: #4493f8;
+      --accent-bg: #0c2d6b;
+      --danger: #ff7b72;
+      --danger-bg: #3d1418;
+      --ok: #3fb950;
+      --ok-bg: #0d2818;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #8b949e;
+    --border: #30363d;
+    --code-bg: #161b22;
+    --accent: #4493f8;
+    --accent-bg: #0c2d6b;
+    --danger: #ff7b72;
+    --danger-bg: #3d1418;
+    --ok: #3fb950;
+    --ok-bg: #0d2818;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.65;
+    margin: 0;
+    padding: 0 16px 80px;
+  }
+  main {
+    max-width: 760px;
+    margin: 0 auto;
+  }
+  header.hero {
+    padding: 56px 0 24px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 32px;
+  }
+  h1 {
+    font-size: 2rem;
+    line-height: 1.25;
+    margin: 0 0 12px;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: 1.05rem;
+    margin: 0 0 20px;
+  }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 0.85rem;
+  }
+  .tag {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 999px;
+    padding: 4px 12px;
+  }
+  h2 {
+    font-size: 1.4rem;
+    margin-top: 48px;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  h3 {
+    font-size: 1.1rem;
+    margin-top: 28px;
+  }
+  p { margin: 14px 0; }
+  a { color: var(--accent); }
+  code {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.9em;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    overflow-x: auto;
+    font-size: 0.85rem;
+  }
+  pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 1em;
+  }
+  .callout {
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+    background: var(--accent-bg);
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin: 20px 0;
+  }
+  .callout.danger {
+    border-left-color: var(--danger);
+    background: var(--danger-bg);
+  }
+  .callout.ok {
+    border-left-color: var(--ok);
+    background: var(--ok-bg);
+  }
+  .callout p:first-child { margin-top: 0; }
+  .callout p:last-child { margin-bottom: 0; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .step {
+    display: flex;
+    gap: 14px;
+    margin: 20px 0;
+  }
+  .step .num {
+    flex: none;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 0.9rem;
+  }
+  .step .content { flex: 1; }
+  footer {
+    margin-top: 64px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 0.9rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+  }
+  th {
+    background: var(--code-bg);
+  }
+</style>
+</head>
+<body>
+<main>
+
+<header class="hero">
+  <h1>Why Codex CLI Can't See Your API Key<br>(Even Though It's Set)</h1>
+  <p class="subtitle">
+    A debugging story about a config field that looks like it points to a file, an environment
+    variable that really is set, and a background daemon that quietly outlived the fix.
+  </p>
+  <div class="meta">
+    <span class="tag">OpenAI Codex CLI</span>
+    <span class="tag">env vars</span>
+    <span class="tag">app-server daemon</span>
+    <span class="tag">Linux / bash</span>
+    <span class="tag">OpenAI-compatible gateways</span>
+  </div>
+</header>
+
+<section>
+<h2>The symptom</h2>
+<p>
+  Codex CLI (<code>@openai/codex</code>) was configured to talk to a local OpenAI-compatible
+  gateway instead of OpenAI directly, via a custom model provider in
+  <code>~/.codex/config.toml</code>:
+</p>
+<pre><code>[model_providers.my_gateway]
+name = "My Gateway"
+base_url = "http://localhost:PORT/v1"
+env_key = "MY_GATEWAY_API_KEY"
+requires_openai_auth = false</code></pre>
+<p>Opening a terminal and running <code>codex</code> produced:</p>
+<pre><code>&gt;_ OpenAI Codex (v0.158.0)
+
+■ Missing environment variable: `MY_GATEWAY_API_KEY`.</code></pre>
+<p>
+  Except the variable <em>was</em> set &mdash; <code>echo $MY_GATEWAY_API_KEY</code> printed it
+  fine, it was exported in <code>~/.bashrc</code>, and even <code>codex doctor</code> reported it
+  as <strong>present</strong>. Closing and reopening the terminal didn't help. This is the trail
+  that led to the actual cause, which had nothing to do with the variable being unset.
+</p>
+</section>
+
+<section>
+<h2>Misconception #1: <code>env_key</code> does not point to a file</h2>
+<p>
+  It's tempting to read <code>env_key = "MY_GATEWAY_API_KEY"</code> and assume Codex resolves that
+  against some <code>.env</code> file it knows about. It doesn't. <code>env_key</code> is nothing
+  more than the <em>name</em> of an environment variable. At request time Codex does the
+  equivalent of:
+</p>
+<pre><code>std::env::var("MY_GATEWAY_API_KEY")</code></pre>
+<p>
+  against its own process environment &mdash; whatever was inherited from the shell that launched
+  it. Codex CLI has no built-in <code>.env</code> loader. If you keep your key in a
+  <code>.env</code> file, <em>nothing</em> reads it into the process unless something else does
+  that work first.
+</p>
+
+<div class="callout">
+<p><strong>Fix, part 1:</strong> make the shell responsible for loading the file before Codex ever
+starts. A small wrapper function in <code>~/.bashrc</code> does the job and keeps the key out of
+version-controlled dotfiles:</p>
+<pre><code># ~/.env (0600 permissions, not committed anywhere)
+MY_GATEWAY_API_KEY=sk-xxxxxxxxxxxxxxxxxxxx
+
+# ~/.bashrc
+mytool() {
+    if [ -f "$HOME/.env" ]; then
+        set -a          # auto-export everything sourced below
+        . "$HOME/.env"
+        set +a
+    fi
+    command mytool "$@"   # hand off to the real binary on PATH
+}</code></pre>
+<p>
+  A bash <em>function</em> with the same name as the binary shadows it for interactive shells,
+  reloading the <code>.env</code> file fresh on every invocation &mdash; so rotating the key later
+  only means editing one file, not re-exporting anything anywhere.
+</p>
+</div>
+
+<p>
+  That fix was verified two different ways: <code>codex doctor</code> reported
+  <code>provider auth env var &nbsp;MY_GATEWAY_API_KEY (present)</code>, and a one-shot
+  <code>codex exec "..."</code> round-tripped a real completion through the gateway. Both worked.
+  The interactive TUI, run in the very same terminal, right after, still failed with the exact
+  same "missing environment variable" error.
+</p>
+</section>
+
+<section>
+<h2>Misconception #2: a working shell means a working session</h2>
+<p>
+  That contradiction &mdash; <code>doctor</code> and <code>exec</code> succeeding, the interactive
+  TUI failing, all in one shell, all with the same freshly-exported variable &mdash; is the actual
+  interesting part of this story. It meant the interactive command path wasn't reading the current
+  process's environment at all.
+</p>
+<p>
+  Codex CLI ships with a background process architecture. Its own <code>--help</code> output says
+  as much, in passing:
+</p>
+<pre><code>Commands:
+  agents   Browse all agent sessions on the shared local app-server daemon
+  app-server   Run the app server or related tooling
+  remote-control   [experimental] Manage the app-server daemon with remote control enabled</code></pre>
+<p>
+  <code>ps aux | grep codex</code> confirmed it: a long-lived <code>codex app-server
+  --managed-daemon</code> process, running detached from any terminal, alongside a
+  <code>pid-update-loop</code> helper.
+</p>
+<pre><code>mfk  3309306  ... codex app-server --listen unix:// --managed-daemon      (started 11:58)
+mfk  3349794  ... codex app-server daemon pid-update-loop                 (started 12:09)</code></pre>
+<p>
+  Reading <code>/proc/&lt;pid&gt;/environ</code> for that daemon confirmed the theory: no
+  <code>MY_GATEWAY_API_KEY</code> anywhere in it. The daemon had been started earlier &mdash;
+  before the key was ever exported anywhere &mdash; and every new terminal since then was simply
+  <strong>connecting to that same pre-existing daemon over a Unix socket</strong> instead of
+  starting a fresh process. New shells, new exports, even a full reboot of the terminal emulator:
+  none of it mattered, because none of it touched the daemon that was actually serving the
+  interactive session.
+</p>
+<p>
+  <code>codex doctor</code> and <code>codex exec</code>, on the other hand, appear to run as
+  self-contained one-off processes that read their own environment directly &mdash; which is why
+  they looked healthy while the interactive TUI, going through the daemon, stayed broken.
+</p>
+
+<div class="callout danger">
+<p><strong>The trap in one sentence:</strong> a tool can hold a cached environment snapshot from
+whenever its background process was first started, and no amount of "fixing" your shell's
+environment afterward will reach a process that already exists and communicates over IPC instead
+of re-reading its environment.</p>
+</div>
+</section>
+
+<section>
+<h2>Diagnosis checklist</h2>
+<div class="step">
+  <div class="num">1</div>
+  <div class="content">
+    <strong>Confirm the variable is really in the current shell.</strong><br>
+    <code>env | grep MY_KEY</code>
+  </div>
+</div>
+<div class="step">
+  <div class="num">2</div>
+  <div class="content">
+    <strong>Check for a background/daemon process for the tool.</strong><br>
+    <code>ps aux | grep -i &lt;toolname&gt;</code> &mdash; look for anything with no controlling
+    TTY (<code>TTY</code> column showing <code>?</code>) that's older than your current terminal.
+  </div>
+</div>
+<div class="step">
+  <div class="num">3</div>
+  <div class="content">
+    <strong>Read that process's actual environment, not yours.</strong><br>
+    <code>tr '\0' '\n' &lt; /proc/&lt;pid&gt;/environ | grep MY_KEY</code><br>
+    If your shell has the variable but this doesn't, you've found a stale cached-environment
+    daemon.
+  </div>
+</div>
+<div class="step">
+  <div class="num">4</div>
+  <div class="content">
+    <strong>Kill it and let the tool respawn a fresh one.</strong><br>
+    <code>kill &lt;pid&gt;</code>, then re-run the tool from a shell that has the correct
+    environment. Confirm no daemon-ish process is left running with the old PID before retrying.
+  </div>
+</div>
+</section>
+
+<section>
+<h2>Why this matters beyond Codex</h2>
+<p>
+  Nothing here is specific to Codex, OpenAI, or any particular gateway. Any CLI with a
+  "start once, reuse a daemon for speed" architecture &mdash; language servers, dev-tool daemons,
+  build caches, IDE backends &mdash; can exhibit exactly this symptom: environment changes that
+  are correct in every new shell, yet invisible to the tool, because the tool isn't reading a
+  fresh environment at all. It's talking to a process that was born before your fix existed.
+</p>
+<p>
+  The general debugging move is the same regardless of tool: separate "is the variable set in
+  <em>my</em> shell" from "is the variable set in the environment of the process actually handling
+  my request." Those can silently diverge the moment a long-lived background process enters the
+  picture, and most CLIs don't advertise that they have one.
+</p>
+</section>
+
+<section>
+<h2>Summary</h2>
+<table>
+<tr><th>Layer</th><th>What it looks like</th><th>What actually happens</th></tr>
+<tr>
+  <td><code>env_key</code> in config</td>
+  <td>Looks like a pointer to a secrets file</td>
+  <td>It's just the name of a process environment variable &mdash; no file awareness at all</td>
+</tr>
+<tr>
+  <td><code>.env</code> file</td>
+  <td>Looks like Codex reads it</td>
+  <td>Nothing reads it unless your shell explicitly sources it before launching Codex</td>
+</tr>
+<tr>
+  <td>New terminal / <code>codex doctor</code> passing</td>
+  <td>Looks like the fix worked</td>
+  <td>Only proves the <em>current process's</em> environment is correct &mdash; not the daemon's</td>
+</tr>
+<tr>
+  <td>Interactive TUI still failing</td>
+  <td>Looks like the fix didn't work</td>
+  <td>The TUI was talking to a pre-existing daemon with a stale environment from its own startup</td>
+</tr>
+</table>
+</section>
+
+<footer>
+  <p>
+    Written up after debugging exactly this on a real machine, so the next person who sees
+    "Missing environment variable" right after confirming it's set doesn't have to rediscover the
+    daemon part from scratch.
+  </p>
+</footer>
+
+</main>
+</body>
+</html>
